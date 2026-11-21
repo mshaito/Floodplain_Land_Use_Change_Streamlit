@@ -41,6 +41,21 @@ def earth_engine_lock():
     return Lock()
 
 
+def earth_engine_help(error):
+    message = str(error).lower()
+    if any(term in message for term in ('service_disabled', 'has not been used', 'earth engine api is disabled')):
+        return 'Enable the Earth Engine API in the selected Google Cloud project.'
+    if any(term in message for term in ('not registered', 'not signed up')):
+        return 'Register the selected Google Cloud project for Earth Engine.'
+    if any(term in message for term in ('serviceusage.services.use', 'user_project_denied', 'service usage consumer')):
+        return 'Grant the service account Service Usage Consumer on the selected project.'
+    if any(term in message for term in ('invalid_grant', 'invalid jwt', 'invalid credentials')):
+        return 'Verify the uploaded service account key is active and belongs to the intended account.'
+    if any(term in message for term in ('permission', 'forbidden', 'access denied')):
+        return 'Check that the service account has Earth Engine Resource Viewer and Service Usage Consumer on the selected project.'
+    return 'Verify the project ID, Earth Engine registration, API enablement, and service account roles.'
+
+
 @contextmanager
 def earth_engine_connection(project, key):
     credentials = None
@@ -56,10 +71,15 @@ def earth_engine_connection(project, key):
     # The Earth Engine Python client keeps its connection in process-wide state.
     with earth_engine_lock():
         try:
-            if credentials is None:
-                ee.Initialize(project=project)
-            else:
-                ee.Initialize(credentials, project=project)
+            try:
+                if credentials is None:
+                    ee.Initialize(project=project)
+                else:
+                    ee.Initialize(credentials, project=project)
+            except ee.EEException as error:
+                raise ValueError(
+                    f'Earth Engine connection failed. {earth_engine_help(error)}'
+                ) from error
             yield
         finally:
             ee.Reset()
@@ -224,6 +244,14 @@ else:
 ee_ready = bool(ee_project and (ee_key or mode != 'Use my project'))
 if not ee_ready:
     st.info('Enter your project ID or number and upload its service account JSON key to run analysis.')
+elif st.button('Test Earth Engine connection'):
+    try:
+        with earth_engine_connection(ee_project, ee_key):
+            st.success('Earth Engine initialized successfully.')
+    except ValueError as error:
+        st.error(str(error))
+    except Exception as error:
+        st.error(f'Earth Engine connection failed. {earth_engine_help(error)}')
 
 st.subheader('Study area')
 method = st.radio('Boundary source', ['Draw on map', 'Upload shapefile'], horizontal=True)
