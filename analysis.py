@@ -107,18 +107,41 @@ def floodplain_mask():
     return ee.Image(ASSET).select('flood').remap([0], [1]).rename('Floodplain')
 
 
-def fetch_floodplain(geometry, grid, work):
+def fetch_floodplain(_geometry, grid, work):
     transform, width, height, crs = grid
-    region = ee.Geometry(mapping(geometry), proj='EPSG:4326', geodesic=False)
     a, b, c, d, e, f = tuple(transform)[:6]
-    image = floodplain_mask().clip(region).unmask(0).toByte()
-    url = image.getDownloadURL({
-        'crs': crs, 'crs_transform': [a, b, c, d, e, f],
-        'dimensions': [width, height], 'format': 'GEO_TIFF',
-    })
+    # The analysis clips the returned grid to the study boundary locally.
+    request = {
+        'expression': floodplain_mask().unmask(0).toByte(),
+        'fileFormat': 'GEO_TIFF',
+        'grid': {
+            'crsCode': crs,
+            'dimensions': {'width': width, 'height': height},
+            'affineTransform': {
+                'scaleX': a, 'shearX': b, 'translateX': c,
+                'shearY': d, 'scaleY': e, 'translateY': f,
+            },
+        },
+    }
+    try:
+        data = ee.data.computePixels(request)
+    except ee.EEException as error:
+        message = str(error).lower()
+        if any(term in message for term in ('permission', 'forbidden', 'access denied', 'not found')):
+            reason = 'Google reported an access or asset availability error.'
+        elif any(term in message for term in ('quota', '429', 'too many requests')):
+            reason = 'Google reported a quota or request rate limit.'
+        elif any(term in message for term in ('grid', 'transform', 'projection', 'dimensions', 'crs')):
+            reason = f'Google reported a raster grid error ({crs}, {width} × {height} pixels).'
+        else:
+            reason = 'Google returned an unclassified error for the raster request.'
+        raise ValueError(f'Earth Engine could not retrieve GFPLAIN250m. {reason}') from error
     path = work / 'floodplain_source.tif'
-    download(url, path)
-    return np.ma.filled(read_on_grid(path, grid), 0) == 1
+    path.write_bytes(data)
+    try:
+        return np.ma.filled(read_on_grid(path, grid), 0) == 1
+    except rasterio.errors.RasterioError as error:
+        raise ValueError('Earth Engine returned a GFPLAIN250m raster that could not be read.') from error
 
 
 def usgs_links(work):
