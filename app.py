@@ -22,7 +22,7 @@ from folium.plugins import Draw
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 from shapely.geometry import mapping, shape
-from shapely.ops import unary_union
+from shapely.ops import transform, unary_union
 from streamlit_folium import st_folium
 
 from analysis import ASSET, PRODUCTS, analyze, fetch_floodplain
@@ -109,7 +109,15 @@ def uploaded_aoi(files, directory):
     return normalize_aoi(gpd.read_file(directory / 'aoi.shp'))
 
 
-def drawing_map(flood_tiles):
+def drawn_geometry(geojson):
+    geometry = shape(geojson)
+    if geometry.bounds[0] < -180 or geometry.bounds[2] > 180:
+        # Leaflet can draw on a repeated copy of the world.
+        geometry = transform(lambda x, y: ((np.asarray(x) + 180) % 360 - 180, y), geometry)
+    return geometry
+
+
+def drawing_map(flood_tiles, map_revision):
     map_view = folium.Map(location=[30, -30], zoom_start=2, tiles='OpenStreetMap')
     if flood_tiles:
         folium.TileLayer(flood_tiles, name='GFPLAIN250m', attr='GFPLAIN250m / Google Earth Engine',
@@ -119,7 +127,7 @@ def drawing_map(flood_tiles):
         'polyline': False, 'circle': False, 'circlemarker': False, 'marker': False,
         'rectangle': True, 'polygon': {'allowIntersection': False},
     }).add_to(map_view)
-    event = st_folium(map_view, key='aoi_map', height=450, use_container_width=True,
+    event = st_folium(map_view, key=f'aoi_map_{map_revision}', height=450, use_container_width=True,
                       returned_objects=['all_drawings'])
     drawings = event.get('all_drawings') or []
     if drawings:
@@ -230,7 +238,13 @@ if method == 'Draw on map':
                 tiles = image.getMapId({'palette': ['2482c0']})['tile_fetcher'].url_format
         except Exception:
             st.warning('The preview layer is unavailable. You can still draw a study boundary.')
-    drawn = drawing_map(tiles)
+    if st.button('Clear drawn area'):
+        st.session_state['map_revision'] = st.session_state.get('map_revision', 0) + 1
+    drawn = drawing_map(tiles, st.session_state.get('map_revision', 0))
+    if drawn:
+        west, south, east, north = drawn_geometry(drawn).bounds
+        st.caption(f'Selected boundary: longitude {west:.4f} to {east:.4f}, '
+                   f'latitude {south:.4f} to {north:.4f}.')
 else:
     uploads = st.file_uploader('Upload matching .shp, .shx, .dbf, and .prj files',
                                type=['shp', 'shx', 'dbf', 'prj', 'cpg'], accept_multiple_files=True)
@@ -250,11 +264,11 @@ if st.button('Run analysis', type='primary', disabled=not (ee_ready and (drawn o
         with tempfile.TemporaryDirectory(prefix='floodplain_') as directory:
             work = Path(directory)
             if drawn:
-                aoi = normalize_aoi(gpd.GeoDataFrame(geometry=[shape(drawn)], crs=4326))
+                aoi = normalize_aoi(gpd.GeoDataFrame(geometry=[drawn_geometry(drawn)], crs=4326))
             else:
                 aoi = uploaded_aoi(uploads, work)
             with st.status('Running floodplain analysis', expanded=True) as status:
-                st.write('Connecting to Earth Engine and retrieving source data')
+                st.write('Validating the selected study area')
                 floodplain_loader = partial(connected_floodplain, ee_project, ee_key)
                 files, metrics = analyze(aoi, product, (initial, final), cds_key, work, st.write,
                                          floodplain_loader=floodplain_loader)

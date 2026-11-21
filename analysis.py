@@ -209,7 +209,12 @@ def analyze(aoi, product, years, cds_key, work, progress, *, floodplain_loader=f
     if product != 'ESA CCI / C3S':
         west, south, east, north = bounds
         if west < -125 or east > -66 or south < 24 or north > 50:
-            raise ValueError('This product covers the conterminous United States. Choose ESA elsewhere.')
+            raise ValueError(
+                f'This dataset covers the conterminous United States. The selected boundary spans '
+                f'longitude {west:.4f} to {east:.4f} and latitude {south:.4f} to {north:.4f}. '
+                'Clear and redraw the area if these coordinates differ from your intended location, '
+                'or choose ESA for a location outside the conterminous United States.'
+            )
     _, _, meters = PRODUCTS[product]
     crs = 'EPSG:6933' if product == 'ESA CCI / C3S' else 'EPSG:5070'
     grid = make_grid(bounds, meters, crs)
