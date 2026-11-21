@@ -21,7 +21,7 @@ from rasterio.vrt import WarpedVRT
 from rasterio.warp import Resampling, transform_bounds
 from shapely.geometry import mapping, shape
 
-ASSET = 'projects/sat-io/open-datasets/GFPLAIN250'
+ASSET = 'IAHS/GFPLAIN250/v0'
 MRLC = 'https://www.mrlc.gov/downloads/sciweb1/shared/mrlc/data-bundles'
 PRODUCTS = {
     'USGS modeled land cover': (1941, 2000, 250),
@@ -102,12 +102,16 @@ def make_grid(bounds, meters, crs):
     return from_origin(west, north, meters, meters), width, height, crs
 
 
+def floodplain_mask():
+    # The catalog raster uses zero for floodplain and masks other pixels.
+    return ee.Image(ASSET).select('flood').remap([0], [1]).rename('Floodplain')
+
+
 def fetch_floodplain(geometry, grid, work):
     transform, width, height, crs = grid
     region = ee.Geometry(mapping(geometry), proj='EPSG:4326', geodesic=False)
     a, b, c, d, e, f = tuple(transform)[:6]
-    image = (ee.ImageCollection(ASSET).filterBounds(region).mosaic()
-             .remap([0], [1]).rename('Floodplain').clip(region).unmask(0).toByte())
+    image = floodplain_mask().clip(region).unmask(0).toByte()
     url = image.getDownloadURL({
         'crs': crs, 'crs_transform': [a, b, c, d, e, f],
         'dimensions': [width, height], 'format': 'GEO_TIFF',

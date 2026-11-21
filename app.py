@@ -25,7 +25,7 @@ from shapely.geometry import mapping, shape
 from shapely.ops import transform, unary_union
 from streamlit_folium import st_folium
 
-from analysis import ASSET, PRODUCTS, analyze, fetch_floodplain
+from analysis import PRODUCTS, analyze, fetch_floodplain, floodplain_mask
 
 st.set_page_config(page_title='Floodplain Land Use Change', page_icon='🌊', layout='wide')
 
@@ -262,7 +262,7 @@ if method == 'Draw on map':
     if ee_ready and st.checkbox('Show mapped floodplains while drawing'):
         try:
             with earth_engine_connection(ee_project, ee_key):
-                image = ee.ImageCollection(ASSET).mosaic().remap([0], [1]).selfMask()
+                image = floodplain_mask()
                 tiles = image.getMapId({'palette': ['2482c0']})['tile_fetcher'].url_format
         except Exception:
             st.warning('The preview layer is unavailable. You can still draw a study boundary.')
@@ -343,7 +343,7 @@ if 'result' in st.session_state:
 
 with st.expander('Data sources'):
     st.markdown(
-        '[GFPLAIN250m](https://doi.org/10.1038/sdata.2018.309) · '
+        '[GFPLAIN250m](https://developers.google.com/earth-engine/datasets/catalog/IAHS_GFPLAIN250_v0) · '
         '[USGS historical modeled land cover](https://doi.org/10.5066/F7KK99RR) · '
         '[USGS land cover projections](https://doi.org/10.5066/P95AK9HP) · '
         '[Annual NLCD](https://www.mrlc.gov/data) · '
